@@ -1,0 +1,279 @@
+---
+title: "Estimation"
+output: learnr::tutorial
+runtime: shiny_prerendered
+---
+
+```{r setup-hide, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(learnr)
+```
+
+## Estimators
+Let's consider the dataset `gradebook` again. The following code has been run to load the data and the libraries we'll need:
+```{r setup, include=TRUE, message = FALSE}
+library(tidyverse)
+library(patchwork)
+
+gradebook <- read.csv("https://raw.githubusercontent.com/sta238/data/main/gradebook.csv") %>% 
+  mutate(final = 0.1*assignment1 + 0.1*assignment2 + 0.3*midterm + 0.5*exam,
+    A = ifelse(final >= 0.8 , 1, 0))
+```
+Notice that two new columns are added; `final` is the marks for the course, calculated as a weighted average of the course components, and `A` is an indicator of whether or not the student received a grade of A or higher in the course.
+
+I want to estimate the proportion of the students who got a grade of A or higher, represented by $\theta$. We will use three different approaches: the maximum likelihood principle, Bayes rule, and the bootstrap principle. 
+
+### Maximum Likelihood Estimation
+
+```{r q_distribution_likelihood, echo=FALSE}
+question("What is the distribution for the event that a student gets a grade of A or higher?",
+  answer("Bernoulli", correct = TRUE),
+  answer("Normal"),
+  answer("Binomial"),
+  answer("Beta"),
+  allow_retry = TRUE,
+  random_answer_order = TRUE,
+  incorrect = "Try again",
+  try_again = "Try again"
+)
+```
+
+Write a function for the likelihood function and plot it. In class, we derived the *maximum likelihood estimator* for $\theta$, $\widehat\theta_{MLE}$. Calculate a *maximum likelihood estimate* using the data in `gradebook` and include it in your plot as a red, dashed vertical line. 
+
+```{r MLE, exercise=TRUE}
+likelihood <- function(x, theta) {
+  L <- 1
+  for (i in 1:length(x))  L <- L * dbinom(x[i], size=1, prob=theta)
+  L
+}
+
+thetahat <- sum(gradebook$A)/length(gradebook$A) # MLE for theta using all data
+
+tibble(para_values = c(0.01,0.99)) %>%
+  ggplot(aes(x = para_values)) +
+  theme_bw() +
+  stat_function(fun= likelihood, args = list(x = gradebook$A), n=1000) + 
+  geom_vline(xintercept = thetahat, color = "red", linetype = "dashed") + 
+  labs(caption = stringr::str_c("The red dashed line shows that the MLE is ", round(thetahat, 3)), # provides an informative caption!
+       x = "theta", y = "likelihood") +
+  theme(plot.caption = element_text(size = 12))
+```
+
+
+
+### Bayesian Inference
+
+Let's put a beta prior on $\theta$. In class, we derived the posterior distribution for a beta priors and a likelihood from the same family of distributions as we're using here. Write a function to plot the prior in blue and posterior in purple. Plot the function for 3-4 sets of values for the hyperparmeters that could represent your belief, indicating the values chosen on each plot (try using `subtitle = str_c("With hyperparameters alpha: ", a," and beta: ", b,"")`).
+
+```{r Bayes, exercise=TRUE}
+n <- length(gradebook$A)
+sumx <- sum(gradebook$A)
+
+prior <- function(theta, a, b) {(1/beta(a,b))* theta^(a-1) * (1-theta)^(b-1) } # a beta distribution 
+posterior <- function(theta, a, b) dbeta(theta, shape1 = sumx + a, shape2 = n - sumx + b) # also, a beta distribution
+
+plot_bayes <- function(a,b) {
+  tibble(x = c(0.01,0.99)) %>%
+  ggplot(aes(x = x)) +
+    theme_bw() +
+    stat_function(fun = prior, colour = "blue", args = list(a, b), n=1000) +
+    stat_function(fun = posterior, colour = "purple", args = list(a, b), n=1000) +
+    labs(subtitle = str_c("With hyperparameters alpha: ", a," and beta: ", b,""),
+         x = "theta",
+         y = "density")
+  }
+    
+plot_bayes(1, 12) / # belief: less than a quarter of the class gets an A
+  plot_bayes(1,4) | # belief: the proportion of A's is most likely small, although there is not much certainty
+  plot_bayes(4,12) / # belief: the proportion is likely less than ~0.55, but there is not much certainty
+  plot_bayes(12,28)  # belief: reasonably certain that the proportion is at least 0.1 but less than 0.5
+```
+
+To get an Bayesian estimate for $\theta$, let's compute the *posterior mean*, that is, the expectation of the posterior distribution. (We will discuss some other options for Bayesian estimators when we revisit the topic in a later lecture.) 
+
+Given a Beta distributed random variable $Y\sim\text{Beta}(\alpha, \beta)$, the expectation is 
+$$ 
+\mathbb{E}[Y] = \frac{\alpha}{\alpha+\beta}
+$$
+Choose your favourite prior and compute $\widehat\theta_{Bayes}=\mathbb{E}[\theta|x]$. Plot the prior (blue), posterior (purple), and indicate the Bayes estimate with a dashed red line. Use similar code as suggested for a plot of the MLE to add an informative caption.
+
+```{r Bayes_est, exercise=TRUE}
+# hyperparameters of the prior
+a <- 12
+b <- 28
+
+# numerical data summaries 
+n <- length(gradebook$A)
+sumx <- sum(gradebook$A)
+
+alpha <- sumx + a
+beta <- n - sumx + b
+
+thetahat <- alpha / (alpha + beta)
+
+prior <- function(theta, a, b) {(1/beta(a,b))* theta^(a-1) * (1-theta)^(b-1) } 
+posterior <- function(theta, a, b) dbeta(theta, shape1 = sumx + a, shape2 = n - sumx + b) 
+
+tibble(x = c(0.01,0.99)) %>%
+  ggplot(aes(x = x)) +
+    theme_bw() +
+    stat_function(fun = prior, colour = "blue", args = list(a, b), n=1000) +
+    stat_function(fun = posterior, colour = "purple", args = list(a, b), n=1000) +
+    geom_vline(xintercept = thetahat, color = "red", linetype = "dashed") + 
+    labs(caption = stringr::str_c("The red dashed line shows that the Bayes estimate is ", round(thetahat, 3)), 
+       x = "theta", y = "density") +
+    theme(plot.caption = element_text(size = 12))
+
+```
+
+
+### Compare MLE & Bayes
+
+The estimates I got for $\theta$ from MLE and Bayes very similar between. To consider how they may differ, consider taking a sample of $n$ students from the class and finding the MLE and Bayes estimates for that sample. Do this for all values of $n$ in the code below. Plot the resulting estimates, with different colours for the different methods. Some of the code is sketched out for you.
+
+```{r compare, exercise = TRUE}
+# hyperparameters of the prior
+a <- 12
+b <- 28
+
+# list of sample sizes
+n <- 2:200
+
+# pull a sample of size n and compute the number of A's in the sample
+sumx <- numeric(length(n))
+for (i in n){
+  set.seed(238)
+  samp <- sample(gradebook$A, size = i, replace=FALSE)
+  sumx[i-1] <- sum(samp) # summarize the data
+}
+
+# combine into a tibble and compute the estimates for each method
+thetahats <- tibble(n, sumx) %>%
+  mutate(MLE = sumx / n, # fill in the formula here
+         Bayes = (sumx + a) / (n + a + b) # fill in the formula here
+         ) %>%
+  pivot_longer(cols = c("MLE", "Bayes"), names_to = "Method", values_to = "Estimate") %>% # to prepare for plotting
+  select(-sumx)
+
+# plot
+ggplot(thetahats, aes(x = n, color = Method)) +
+  theme_bw() +
+  geom_point(aes(y = Estimate), size = 0.7) +
+  labs(x = "n", y = "Estimate for theta") 
+```
+
+
+
+## Bootstrap
+
+So far, we've found what are called *point estimates*. Point estimates are our "best guesses" for a parameter value, based on the data we have. But we haven't said anything about the variability of those estimates. In general, we want to report on the variability of an estimator, but closed-form solutions can be difficult to come by. Bootstrapping is an important method because of it's effectiveness for finding the variability of an estimator. The kind of variability that we'll consider here is called the *standard error*, the standard deviation of an estimator's sampling distribution.
+
+Use an empirical bootstrap to estimate the proportion of students who's get an A or higher in the course, $\theta$, and the standard error of $\widehat\theta$. Plot a histogram of the bootstrap distribution for $\widehat\theta$ with a layer showing a density function for a normal distribution with appropriate parameter values (for a normal approximation to the binomial).
+
+```{r boot_emp, exercise = TRUE}
+n <- length(gradebook$A)
+B <- 1000
+
+set.seed(238)
+boottheta <- numeric(B)
+for (i in 1:B){
+  bootsamp <- sample(gradebook$A, n, replace = TRUE)
+  boottheta[i] <- mean(bootsamp)
+}
+
+bootest <- mean(boottheta)
+bootse <- sd(boottheta)
+stringr::str_c("The empirical bootstrap estimate is ", round(bootest, 4), ", with a standard error of ", round(bootse, 4))
+
+thetahat <- mean(gradebook$A) # proportion of A's in the class
+thetahatse <- sqrt(thetahat*(1-thetahat)/n) # derived SE for thetahat
+
+tibble(x = boottheta) %>%
+  ggplot(aes(x = x)) +
+  theme_bw() +
+  geom_histogram(aes(y = after_stat(density)), bins = 24, colour = "black", fill = "lightgrey") +
+  stat_function(fun = dnorm, colour = "blue", linetype = "dashed", args = list(thetahat, thetahatse))
+
+```
+
+
+
+Use a parametric bootstrap to, again, estimate $\theta$ and the standard error of $\widehat\theta$, and plot a histogram of the bootstrap distribution for $\widehat\theta$.
+
+```{r boot_para, exercise = TRUE}
+n <- length(gradebook$A)
+B <- 1000
+
+thetahat <- mean(gradebook$A)
+thetahatse <- sqrt(thetahat*(1-thetahat)/n)
+
+set.seed(238)
+boottheta <- numeric(B)
+for (i in 1:B){
+  bootsamp <- rbinom(n, size = 1, prob = thetahat) 
+  boottheta[i] <- mean(bootsamp) 
+}
+
+bootest <- mean(boottheta)
+bootse <- sd(boottheta)
+stringr::str_c("The parametric bootstrap estimate is ", round(bootest, 4), ", with a standard error of ", round(bootse, 4))
+
+tibble(x = boottheta) %>%
+  ggplot(aes(x = x)) +
+  theme_bw() +
+  geom_histogram(aes(y = after_stat(density)), bins = 24, colour = "black", fill = "lightgrey") +
+  stat_function(fun = dnorm, colour = "blue", linetype = "dashed", args = list(thetahat, thetahatse))
+
+```
+
+
+
+
+
+### Exam marks
+
+```{r include=FALSE}
+a <- 9
+b <- 3
+sigma2 <- (a*b) / ((a+b)^2 * (a+b+1))
+mu <- a/(a+b)
+```
+
+Suppose we wanted to estimate the mean of the exam marks, $\mu$ and I can tell you that the true variance is $0.01442308$. However, you only have a sample of 20 marks. Assume the marks are normally distributed. Compute the maximum likelihood and Bayes estimates, and use the bootstrap to get an estimate of the error for each. Try it for different values of your hyper-parameters. Can you find values of the hyper-parameters that changes the error?
+
+```{r known_sigma, exercise = TRUE}
+n <- 20
+set.seed(238)
+x <- sample(gradebook$exam, n, replace=FALSE)
+
+# MLE
+muhat_mle <- mean(x)
+
+# Bayes estimate
+sigma0 <- 0.01442308
+mu0 <- 0.75
+tau0 <- sd(x)
+muhat_bayes <- (1/tau0^2 + n/sigma0^2)^-1 * (mu0/tau0^2 + n*mean(x)/sigma0^2)
+
+# Bootstrap to estimate the errors
+B <- 1000
+set.seed(238)
+boottheta <- numeric(B)
+for (i in 1:B){
+  bootsamp <- sample(x, n, replace = TRUE)
+  boottheta[i] <- mean(bootsamp)
+}
+
+booterr_mle <- mean(boottheta - muhat_mle)
+booterr_bayes <- mean(boottheta - muhat_bayes)
+
+
+stringr::str_c("The MLE is ", round(muhat_mle, 4), ", the Bayes estimate is ", round(muhat_bayes, 4), ", and the bootstrap estimates for the errors are ", round(booterr_mle, 6), " and ", round(booterr_bayes, 6), ", respectively.")
+```
+
+
+
+
+
+
+
